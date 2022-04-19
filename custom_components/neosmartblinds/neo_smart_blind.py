@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 
 import asyncio
@@ -10,7 +11,6 @@ from .const import (
     CMD_DOWN2,
     CMD_STOP,
     CMD_FAV,
-    # CMD_FAV_1,  not used.
     CMD_FAV_2,
     CMD_MICRO_UP,
     CMD_MICRO_DOWN,
@@ -22,6 +22,82 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 LOGGER = logging.getLogger()
 
+parents = {}
+
+class NeoParentBlind(object):
+    def __init__(self):
+        self._child_count = 0
+        self._intent = 0
+        self._fulfilled = False
+        self._time_of_first_intent = None
+        self._intended_command = None
+
+    def add_child(self):
+        self._child_count += 1
+
+    def register_intent(self, command):
+        if self._intended_command is None:
+            self._intended_command = command
+
+        if self._intended_command != command:
+            _LOGGER.debug("{}, abandoning aggregated group command {}".format(command, self._intended_command))
+            return
+
+        self._intent += 1
+        if self._intent >= self._child_count:
+            self._fulfilled = True
+        
+        if self._time_of_first_intent is None:
+            self._time_of_first_intent = time.time() + 0.25
+
+
+    def unregister_intent(self):
+        self._intent -= 1
+        if self._intent == 0:
+            self._fulfilled = False
+            self._time_of_first_intent = None
+            self._intended_command = None
+
+    CHANGE_DEVICE = 0
+    IGNORE = 1
+    USE_DEVICE = 2
+
+    def fulfilled(self):
+        return self._fulfilled
+
+    def act_on_intent(self):
+        if not self._fulfilled:
+            return NeoParentBlind.USE_DEVICE
+        
+        if self._intent == self._child_count:
+            return NeoParentBlind.CHANGE_DEVICE
+
+        return NeoParentBlind.IGNORE
+
+    async def async_backoff(self):
+        now = time.time()
+        sleep_duration = self._time_of_first_intent - now if self._time_of_first_intent is not None else 0
+        if sleep_duration > 0:
+            _LOGGER.debug("{}, observing blind commands for {}s".format(self._intended_command, sleep_duration))
+            await asyncio.sleep(sleep_duration)
+
+time_of_last_command = time.time()
+BACKOFF = 0.5
+
+async def async_backoff():
+    global time_of_last_command
+    now = time.time()
+    sleep_duration = 0.0
+    since_last = now - time_of_last_command
+
+    if since_last < BACKOFF:
+        sleep_duration = BACKOFF - since_last
+
+    time_of_last_command = now + sleep_duration
+
+    if sleep_duration > 0.0:
+        _LOGGER.debug("Delaying command for {}s".format(sleep_duration))
+        await asyncio.sleep(sleep_duration)
 
 class NeoCommandSender(object):
     def __init__(self, host, the_id, device, port, motor_code):
@@ -45,7 +121,7 @@ class NeoCommandSender(object):
             if self._was_connected or self._was_connected is None:
                 _LOGGER.warning('{}, disconnected from hub: {}'.format(self._device, repr(result)))
                 self._was_connected = False
-
+        
         return self._was_connected
 
     @property
@@ -57,9 +133,49 @@ class NeoCommandSender(object):
         return self._motor_code
 
 
-class NeoTcpCommandSender(NeoCommandSender):
+    def register_parents(self, device):
+        global parents
 
-    async def async_send_command(self, command):
+        if not device in parents:
+            parent = NeoParentBlind()
+            parents[device] = parent
+
+        parents[device].add_child()
+
+    async def async_send_command(self, command, parent_device = None):
+        global parents
+        action = NeoParentBlind.USE_DEVICE
+
+        if parent_device is not None:
+            # find parent, register intent
+            if parent_device in parents:
+                _LOGGER.debug("{}, checking for aggregation {}".format(self._device, parent_device))
+                parent = parents[parent_device]
+                parent.register_intent(command)
+                # wait for 250ms
+                await parent.async_backoff()
+                action = parent.act_on_intent()
+                parent.unregister_intent()
+
+        # if parent fulfilled, use it else continue
+        if action == NeoParentBlind.USE_DEVICE:
+            _LOGGER.debug("{}, issuing command".format(self._device))
+            await async_backoff()
+            return await self.async_send_command_to_device(command, self._device)
+        elif action == NeoParentBlind.CHANGE_DEVICE:
+            _LOGGER.debug("{}, issuing to group command instead {}".format(self._device, parent_device))
+            await async_backoff()
+            return await self.async_send_command_to_device(command, parent_device)
+        else:
+            _LOGGER.debug("{}, aggregated to group command".format(self._device))
+            return True
+
+    async def async_send_command_to_device(self, command, device):
+        _LOGGER.error("I should do something but I cannot!")
+
+class NeoTcpCommandSender(NeoCommandSender):
+    
+    async def async_send_command_to_device(self, command, device):
         """Command sender for TCP"""
 
         async def async_sender():
@@ -72,12 +188,13 @@ class NeoTcpCommandSender(NeoCommandSender):
             if self._motor_code:
                 mc = "!{}".format(self._motor_code)
 
-            complete_command = self._device + "-" + command + mc + '\r\n'
-            _LOGGER.debug("{}, Tx: {}".format(self._device, complete_command))
+            complete_command = device + "-" + command + mc + '\r\n'
+            _LOGGER.debug("{}, Tx: {}".format(device, complete_command))
             writer.write(complete_command.encode())
+            await writer.drain()
 
             response = await reader.read()
-            _LOGGER.debug("{}, Rx: {}".format(self._device, response.decode()))
+            _LOGGER.debug("{}, Rx: {}".format(device, response.decode()))
 
             writer.close()
             await writer.wait_closed()
@@ -88,13 +205,12 @@ class NeoTcpCommandSender(NeoCommandSender):
         except Exception as e:
             return self.on_io_complete(e)
 
-
 class NeoHttpCommandSender(NeoCommandSender):
     def __init__(self, http_session_factory, host, the_id, device, port, motor_code):
         self._session = http_session_factory(DEFAULT_IO_TIMEOUT)
         super().__init__(host, the_id, device, port, motor_code)
 
-    async def async_send_command(self, command):
+    async def async_send_command_to_device(self, command, device):
         """Command sender for HTTP"""
         url = "http://{}:{}/neo/v1/transmit".format(self._host, self._port)
 
@@ -105,24 +221,26 @@ class NeoHttpCommandSender(NeoCommandSender):
         hash_string = str(datetime.now().microsecond).zfill(7)
         # hash_string = pre_strip[-7:].strip(".")
 
-        params = {'id': self._the_id, 'command': self._device + "-" + command + mc, 'hash': hash_string}
+        params = {'id': self._the_id, 'command': device + "-" + command + mc, 'hash': hash_string}
 
         try:
             async with self._session.get(url=url, params=params, raise_for_status=True) as r:
-                _LOGGER.debug("{}, Tx: {}".format(self._device, r.url))
-                _LOGGER.debug("{}, Rx: {} - {}".format(self._device, r.status, await r.text()))
+                _LOGGER.debug("{}, Tx: {}".format(device, r.url))
+                _LOGGER.debug("{}, Rx: {} - {}".format(device, r.status, await r.text()))
                 return self.on_io_complete()
         except Exception as e:
             # LOGGER.error("Exception while sending http command: {}, Tx: {}".format(self._device, r.url))
             _LOGGER.error("Parameters: {}".format(params))
             _LOGGER.error("URL: {}".format(url))
             _LOGGER.error(e.__str__())
-            return self.on_io_complete(e)
 
+            return self.on_io_complete(e)
+        
 
 class NeoSmartBlind:
-    def __init__(self, host, the_id, device, port, protocol, rail, motor_code, http_session_factory):
+    def __init__(self, host, the_id, device, port, protocol, rail, motor_code, parent_code, http_session_factory):
         self._rail = rail
+        self._parent_code = parent_code
 
         if self._rail < 1 or self._rail > 2:
             _LOGGER.error("{}, unknown rail: {}, please use: 1 or 2".format(device, rail))
@@ -138,6 +256,10 @@ class NeoSmartBlind:
 
         else:
             _LOGGER.error("{}, unknown protocol: {}, please use: http or tcp".format(device, protocol))
+            return
+
+        if parent_code is not None and len(parent_code) > 0:
+            self._command_sender.register_parents(parent_code)
 
     def unique_id(self, prefix):
         return "{}.{}.{}.{}".format(prefix, self._command_sender.device, self._command_sender.motor_code, self._rail)
@@ -146,20 +268,20 @@ class NeoSmartBlind:
         """NeoBlinds works off of percent closed, but HA works off of percent open, so need to invert the percentage"""
         closed_pos = 100 - pos
         padded_position = f'{closed_pos:02}'
-        return await self._command_sender.async_send_command(padded_position)
+        return await self._command_sender.async_send_command(padded_position, self._parent_code)
 
     async def async_stop_command(self):
-        return await self._command_sender.async_send_command(CMD_STOP)
+        return await self._command_sender.async_send_command(CMD_STOP, self._parent_code)
 
-    async def async_open_cover_tilt(self):
+    async def async_open_cover_tilt(self, **kwargs):
         if self._rail == 1:
             return await self._command_sender.async_send_command(CMD_MICRO_UP)
         elif self._rail == 2:
             return await self._command_sender.async_send_command(CMD_MICRO_UP2)
         """Open the cover tilt."""
         return False
-
-    async def async_close_cover_tilt(self):
+        
+    async def async_close_cover_tilt(self, **kwargs):
         if self._rail == 1:
             return await self._command_sender.async_send_command(CMD_MICRO_DOWN)
         elif self._rail == 2:
@@ -168,21 +290,19 @@ class NeoSmartBlind:
         return False
 
     """Send down command with rail support"""
-
     async def async_down_command(self):
         if self._rail == 1:
-            return await self._command_sender.async_send_command(CMD_DOWN)
+            return await self._command_sender.async_send_command(CMD_DOWN, self._parent_code)
         elif self._rail == 2:
-            return await self._command_sender.async_send_command(CMD_DOWN2)
+            return await self._command_sender.async_send_command(CMD_DOWN2, self._parent_code)
         return False
 
     """Send up command with rail support"""
-
     async def async_up_command(self):
         if self._rail == 1:
-            return await self._command_sender.async_send_command(CMD_UP)
+            return await self._command_sender.async_send_command(CMD_UP, self._parent_code)
         elif self._rail == 2:
-            return await self._command_sender.async_send_command(CMD_UP2)
+            return await self._command_sender.async_send_command(CMD_UP2, self._parent_code)
         return False
 
     async def async_set_fav_position(self, pos):
@@ -194,8 +314,11 @@ class NeoSmartBlind:
                 return 51
         return False
 
+
+
+
 # 2021-05-13 10:20:38 INFO (SyncWorker_4) [root] Sent: http://<ip>:8838/neo/v1/transmit?id=440036000447393032323330&command=146.215-08-up&hash=.812864
 # 2021-05-13 10:20:38 INFO (SyncWorker_4) [root] Neo Hub Responded with - 
 
 # 2021-05-13 10:30:54 INFO (SyncWorker_6) [root] Sent: http://<ip>:8838/neo/v1/transmit?id=440036000447393032323330&command=146.215-08-sp&hash=4.65143 (from 1620901854.65143)
-# 2021-05-13 10:30:54 INFO (SyncWorker_6) [root] Neo Hub Responded with -
+# 2021-05-13 10:30:54 INFO (SyncWorker_6) [root] Neo Hub Responded with - 
