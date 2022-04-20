@@ -16,7 +16,9 @@ from .const import (
     CMD_MICRO_DOWN,
     CMD_MICRO_UP2,
     CMD_MICRO_DOWN2,
-    DEFAULT_IO_TIMEOUT
+    DEFAULT_IO_TIMEOUT,
+    DEFAULT_COMMAND_AGGREGATION_PERIOD,
+    DEFAULT_COMMAND_BACKOFF
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ class NeoParentBlind(object):
         self._fulfilled = False
         self._time_of_first_intent = None
         self._intended_command = None
+        self._wait = asyncio.Event()
 
     def add_child(self):
         self._child_count += 1
@@ -41,14 +44,16 @@ class NeoParentBlind(object):
 
         if self._intended_command != command:
             _LOGGER.debug("{}, abandoning aggregated group command {}".format(command, self._intended_command))
+            self._wait.set()
             return
 
         self._intent += 1
         if self._intent >= self._child_count:
             self._fulfilled = True
+            self._wait.set()
         
         if self._time_of_first_intent is None:
-            self._time_of_first_intent = time.time() + 0.25
+            self._time_of_first_intent = time.time() + DEFAULT_COMMAND_AGGREGATION_PERIOD
 
 
     def unregister_intent(self):
@@ -57,6 +62,7 @@ class NeoParentBlind(object):
             self._fulfilled = False
             self._time_of_first_intent = None
             self._intended_command = None
+            self._wait.clear()
 
     CHANGE_DEVICE = 0
     IGNORE = 1
@@ -78,11 +84,11 @@ class NeoParentBlind(object):
         now = time.time()
         sleep_duration = self._time_of_first_intent - now if self._time_of_first_intent is not None else 0
         if sleep_duration > 0:
-            _LOGGER.debug("{}, observing blind commands for {}s".format(self._intended_command, sleep_duration))
-            await asyncio.sleep(sleep_duration)
+            _LOGGER.debug("{}, observing blind commands for {:.3f}s".format(self._intended_command, sleep_duration))
+            # await asyncio.sleep(sleep_duration)
+            await asyncio.wait_for(asyncio.create_task(self._wait.wait()), sleep_duration)
 
 time_of_last_command = time.time()
-BACKOFF = 0.5
 
 async def async_backoff():
     global time_of_last_command
@@ -90,13 +96,13 @@ async def async_backoff():
     sleep_duration = 0.0
     since_last = now - time_of_last_command
 
-    if since_last < BACKOFF:
-        sleep_duration = BACKOFF - since_last
+    if since_last < DEFAULT_COMMAND_BACKOFF:
+        sleep_duration = DEFAULT_COMMAND_BACKOFF - since_last
 
     time_of_last_command = now + sleep_duration
 
     if sleep_duration > 0.0:
-        _LOGGER.debug("Delaying command for {}s".format(sleep_duration))
+        _LOGGER.debug("Delaying command for {:.3f}s".format(sleep_duration))
         await asyncio.sleep(sleep_duration)
 
 class NeoCommandSender(object):
