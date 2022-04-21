@@ -85,8 +85,11 @@ class NeoParentBlind(object):
         sleep_duration = self._time_of_first_intent - now if self._time_of_first_intent is not None else 0
         if sleep_duration > 0:
             _LOGGER.debug("{}, observing blind commands for {:.3f}s".format(self._intended_command, sleep_duration))
-            # await asyncio.sleep(sleep_duration)
-            await asyncio.wait_for(asyncio.create_task(self._wait.wait()), sleep_duration)
+            try:
+                await asyncio.wait_for(asyncio.create_task(self._wait.wait()), sleep_duration)
+            except asyncio.TimeoutError:
+                # all done
+                pass 
 
 time_of_last_command = time.time()
 
