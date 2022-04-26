@@ -43,9 +43,11 @@ class NeoParentBlind(object):
             self._intended_command = command
 
         if self._intended_command != command:
-            _LOGGER.debug("{}, abandoning aggregated group command {}".format(command, self._intended_command))
+            _LOGGER.debug("{}, abandoning aggregated group command {} with {} waiting".format(
+                command, self._intended_command, self._intent)
+                )
             self._wait.set()
-            return
+            return False
 
         self._intent += 1
         if self._intent >= self._child_count:
@@ -54,6 +56,8 @@ class NeoParentBlind(object):
         
         if self._time_of_first_intent is None:
             self._time_of_first_intent = time.time() + DEFAULT_COMMAND_AGGREGATION_PERIOD
+
+        return True
 
 
     def unregister_intent(self):
@@ -160,11 +164,10 @@ class NeoCommandSender(object):
             if parent_device in parents:
                 _LOGGER.debug("{}, checking for aggregation {}".format(self._device, parent_device))
                 parent = parents[parent_device]
-                parent.register_intent(command)
-                # wait for 250ms
-                await parent.async_backoff()
-                action = parent.act_on_intent()
-                parent.unregister_intent()
+                if parent.register_intent(command):
+                    await parent.async_backoff()
+                    action = parent.act_on_intent()
+                    parent.unregister_intent()
 
         # if parent fulfilled, use it else continue
         if action == NeoParentBlind.USE_DEVICE:
@@ -328,6 +331,3 @@ class NeoSmartBlind:
 
 # 2021-05-13 10:20:38 INFO (SyncWorker_4) [root] Sent: http://<ip>:8838/neo/v1/transmit?id=440036000447393032323330&command=146.215-08-up&hash=.812864
 # 2021-05-13 10:20:38 INFO (SyncWorker_4) [root] Neo Hub Responded with - 
-
-# 2021-05-13 10:30:54 INFO (SyncWorker_6) [root] Sent: http://<ip>:8838/neo/v1/transmit?id=440036000447393032323330&command=146.215-08-sp&hash=4.65143 (from 1620901854.65143)
-# 2021-05-13 10:30:54 INFO (SyncWorker_6) [root] Neo Hub Responded with - 
