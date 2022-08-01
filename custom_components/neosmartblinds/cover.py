@@ -387,7 +387,7 @@ class NeoSmartBlindsCover(CoverEntity, RestoreEntity):
         # Be pessimistic and ensure that a command is always issued. To do this, ensure
         # any pending request is stopped first
         if self._pending_positioning_command is not None:
-            await self.async_stop_cover()
+            await self.async_stop_cover_partially()
             
         await self.async_close_cover_to(0)
         
@@ -423,7 +423,7 @@ class NeoSmartBlindsCover(CoverEntity, RestoreEntity):
         # Be pessimistic and ensure that a command is always issued. To do this, ensure
         # any pending request is stopped first
         if self._pending_positioning_command is not None:
-            await self.async_stop_cover()
+            await self.async_stop_cover_partially()
 
         await self.async_open_cover_to(100)
 
@@ -491,11 +491,23 @@ class NeoSmartBlindsCover(CoverEntity, RestoreEntity):
                 self._current_position = self.pending_positioning_command.starting_position
             self._pending_positioning_command = None
             # Signal to any other awaiting coroutines that the stop has completed fully
-            self._stopped.set()
+            if self._stopped is None:
+                if result:
+                    LOGGER.error('{} move done but state broken'.format(self._name))
+            else:
+                self._stopped.set()
             # Finally, notify ha of the state change
             self.async_write_ha_state()
 
     async def async_stop_cover(self, **kwargs):
+        """Stop the cover."""
+        await self.async_stop_cover_partially()
+        if self.pending_positioning_command is not None:
+            LOGGER.info('{} stopped and cleaning up'.format(self._name))
+            self._pending_positioning_command = None
+            self._stopped = None
+
+    async def async_stop_cover_partially(self):
         """Stop the cover."""
         LOGGER.info('{} stop'.format(self._name))
         await self._client.async_stop_command()
@@ -569,7 +581,7 @@ class NeoSmartBlindsCover(CoverEntity, RestoreEntity):
                 # The estimated position will be returned if the cover is moving in the wrong direction
                 if estimated_position is not None:
                     # STOP then issue new command
-                    await self.async_stop_cover()
+                    await self.async_stop_cover_partially()
                     delta = pos - estimated_position
                 elif self._percent_support == EXPLICIT_POSITIONING:
                     # just issue the new position, the wait is adjusted already
