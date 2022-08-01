@@ -36,6 +36,7 @@ cover:
     percent_support: 1
     motor_code: bf
     start_position: 50
+    parent_group: 021.230-15
 ```
 
 ## Configuration variables
@@ -111,6 +112,12 @@ This is required for some smart hubs to work (model C-BR300)
 
 **start_position** _(int)_<br>
 Optional starting position for the blind when HA starts up. If not specified, the integration will restore the position saved from the last time HA was shutdown. This value is ignored if percent_support is zero.
+
+**parent_group** _(String)_<br>
+See blind_code for instructions on how to find the room code. This parameter is optional. <br>
+If the same group is specified for multiple blinds, the integration will pause briefly (250ms) before issuing a command to see whether to 
+send to the individual blind or to the parent group. As the hub is limited in the number of requests it can handle, this can help in cases
+where multiple blinds are controlled in home assistant or via Homekit / Alexa etc. 
 
 <br><br>
 
