@@ -5,5 +5,5 @@
   "codeowners": ["4n0nD3v3l0p3r","mtgeekman","clara-j","gee-jay-bee"],
   "name": "NeoSmartBlinds",
   "version": "2.2",
-  "requirements": ["requests==2.28.2"]
+  "requirements": ["requests==2.31.0"]
 }
