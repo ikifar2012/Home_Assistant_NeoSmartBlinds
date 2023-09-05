@@ -4,6 +4,6 @@
   "issue_tracker": "https://github.com/mtgeekman/Home_Assistant_NeoSmartBlinds/issues",
   "codeowners": ["4n0nD3v3l0p3r","mtgeekman","clara-j","gee-jay-bee"],
   "name": "NeoSmartBlinds",
-  "version": "2.2.4",
-  "requirements": ["requests==2.31.0"]
+  "version": "2.2.5",
+  "requirements": ["requests>=2.31.0"]
 }
