@@ -11,16 +11,9 @@ import homeassistant.helpers.config_validation as cv
 import functools as ft
 from homeassistant.helpers.restore_state import RestoreEntity
 
-
 from homeassistant.components.cover import (
-    SUPPORT_CLOSE,
-    SUPPORT_OPEN,
-    SUPPORT_STOP,
-    SUPPORT_SET_POSITION,    
-    SUPPORT_OPEN_TILT,
-    SUPPORT_CLOSE_TILT,
-    SUPPORT_SET_TILT_POSITION,
     CoverEntity,
+    CoverEntityFeature,
     ATTR_CURRENT_POSITION
 )
 
@@ -52,13 +45,13 @@ from .const import (
 PARALLEL_UPDATES = 0
 
 SUPPORT_NEOSMARTBLINDS = (
-    SUPPORT_OPEN
-    | SUPPORT_CLOSE
-    | SUPPORT_SET_POSITION
-    | SUPPORT_OPEN_TILT
-    | SUPPORT_CLOSE_TILT
-    | SUPPORT_SET_TILT_POSITION
-    | SUPPORT_STOP
+    CoverEntityFeature.OPEN
+    | CoverEntityFeature.CLOSE
+    | CoverEntityFeature.SET_POSITION
+    | CoverEntityFeature.OPEN_TILT
+    | CoverEntityFeature.CLOSE_TILT
+    | CoverEntityFeature.SET_TILT_POSITION
+    | CoverEntityFeature.STOP
 )
 
 _LOGGER = logging.getLogger(__name__)
