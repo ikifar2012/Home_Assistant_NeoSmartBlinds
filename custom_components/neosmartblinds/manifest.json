@@ -7,5 +7,5 @@
   "version": "2.3.3",
   "requirements": ["requests>=2.31.0"],
   "domains": ["cover"],
-  "iot_class": ["Assumed State", "Local Push"]
+  "iot_class": ["assumed_state", "local_push"]
 }

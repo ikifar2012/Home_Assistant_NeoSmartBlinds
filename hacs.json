@@ -3,6 +3,5 @@
   "zip_release": true,
   "filename": "neosmartblinds.zip",
   "render_readme": true,
-  "domains": ["cover"],
-  "iot_class": ["Assumed State", "Local Push"]
+  "domains": ["cover"]
 }
