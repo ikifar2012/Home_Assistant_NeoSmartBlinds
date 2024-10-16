@@ -4,7 +4,7 @@
   "issue_tracker": "https://github.com/mtgeekman/Home_Assistant_NeoSmartBlinds/issues",
   "codeowners": ["@4n0nD3v3l0p3r","@mtgeekman","@clara-j","@gee-jay-bee"],
   "name": "NeoSmartBlinds",
+  "iot_class": "assumed_state",
   "version": "2.3.3",
-  "requirements": ["requests>=2.31.0"],
-  "iot_class": ["assumed_state", "local_push"]
+  "requirements": ["requests>=2.31.0"]
 }
