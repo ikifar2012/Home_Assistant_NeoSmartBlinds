@@ -1,0 +1,21 @@
+name: Publish Release
+on:
+  workflow_dispatch:
+  release:
+    types: ["published"]
+jobs:
+  publish-release:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@v4.2.1
+      - name: 📦 Created zipped release package
+        shell: bash
+        run: |
+          cd "${{ github.workspace }}/custom_components/neosmartblinds"
+          zip neosmartblinds.zip -r ./
+      - name: 🚀 Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ github.workspace }}/custom_components/neosmartblinds/neosmartblinds.zip
